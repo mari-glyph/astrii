@@ -1,10 +1,12 @@
 import { useState, useCallback } from 'react';
 
+//Manage image state cross-app
 export interface ImageState {
   bitmap: ImageBitmap | null;
   file: File | null;
   width: number;
   height: number;
+  previewUrl: string | null;
 }
 
 export function useImageInput() {
@@ -13,33 +15,36 @@ export function useImageInput() {
     file: null,
     width: 0,
     height: 0,
+    previewUrl: null,
   });
 
-  const handleImageLoad = useCallback((bitmap: ImageBitmap, file: File | null) => {
-    // Clean up previous bitmap
-    if (imageState.bitmap) {
-      imageState.bitmap.close();
-    }
-
-    setImageState({
-      bitmap,
-      file,
-      width: bitmap.width,
-      height: bitmap.height,
+  //hangle incoming image from ImageInput & cleans up prev img
+  const handleImageLoad = useCallback((bitmap: ImageBitmap, file: File | null, previewUrl: string) => {
+    setImageState(prev => {
+      prev.bitmap?.close();
+      if (prev.previewUrl) {
+        URL.revokeObjectURL(prev.previewUrl);
+      }
+      return {
+        bitmap,
+        file,
+        width: bitmap.width,
+        height: bitmap.height,
+        previewUrl,
+      };
     });
-  }, [imageState.bitmap]);
+  }, []);
 
+  //Reset image state & clean up resources
   const clearImage = useCallback(() => {
-    if (imageState.bitmap) {
-      imageState.bitmap.close();
-    }
-    setImageState({
-      bitmap: null,
-      file: null,
-      width: 0,
-      height: 0,
+    setImageState(prev => {
+      prev.bitmap?.close();
+      if (prev.previewUrl) {
+        URL.revokeObjectURL(prev.previewUrl);
+      }
+      return { bitmap: null, file: null, width: 0, height: 0, previewUrl: null };
     });
-  }, [imageState.bitmap]);
+  }, []);
 
   return {
     imageState,
