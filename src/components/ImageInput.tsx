@@ -1,12 +1,12 @@
-import { useState, useRef, ChangeEvent } from 'react';
+// ImageInput.tsx
+import { useState, useRef, ChangeEvent, useCallback } from 'react';
 import { Upload, Link as LinkIcon, AlertCircle } from 'lucide-react';
 
-// Props for ImageInput component
 interface ImageInputProps {
   onImageLoad: (bitmap: ImageBitmap, file: File | null, previewUrl: string) => void;
   onError?: (error: string) => void;
-  maxSize?: number; // maxSize in MB 
-  maxDimensions?: number; // max width or height in pixels
+  maxSize?: number;       // MB
+  maxDimensions?: number; // max width or height (px)
 }
 
 export default function ImageInput({
@@ -15,36 +15,33 @@ export default function ImageInput({
   maxSize = 10,
   maxDimensions = 4096,
 }: ImageInputProps) {
-    //internal state & refs
+  // === Local State ===
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  //helper function for error handling 
-  const handleError = (message: string) => {
+  // ✅ useCallback ensures referential stability (avoids re-creating function on every render)
+  const handleError = useCallback((message: string) => {
     setError(message);
-    onError?.(message); //Optional chaining to avoid crash when onError is not defined
+    onError?.(message); // Optional chaining — only call if defined
     setLoading(false);
-  };
+  }, [onError]);
 
-  //Convert file/blob into ImageBitmap using native API (and manual fallback to image loading)
-  const createBitmapFromFile = async (file: File | Blob): Promise<ImageBitmap> => {
+  // === Utility: Create ImageBitmap with fallback for Safari/older browsers ===
+  const createBitmapFromFile = useCallback(async (file: File | Blob): Promise<ImageBitmap> => {
     if ('createImageBitmap' in window) return await createImageBitmap(file);
-    return await createImageBitmapFallback(file);
-  };
-
-  const createImageBitmapFallback = (file: File | Blob): Promise<ImageBitmap> =>
-    new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
-        URL.revokeObjectURL(url);
-        resolve({
+        const bitmapLike = {
           width: img.width,
           height: img.height,
           close: () => {},
-        } as ImageBitmap);
+        } as ImageBitmap;
+        URL.revokeObjectURL(url);
+        resolve(bitmapLike);
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
@@ -52,81 +49,78 @@ export default function ImageInput({
       };
       img.src = url;
     });
+  }, []);
 
-    //Handle validation, loading, and image dimension checks
-  const processImage = async (file: File | Blob) => {
-    setLoading(true);
-    setError(null);
-
-    if (file instanceof File && !file.type.startsWith('image/')) {
-      handleError('Please select a valid image file');
-      return;
-    }
-
-    if (file.size > maxSize * 1024 * 1024) {
-      handleError(`File size exceeds ${maxSize}MB`);
-      return;
-    }
-
+  // === Core: Process and validate image ===
+  const processImage = useCallback(async (file: File | Blob) => {
     try {
-      const bitmap = await createBitmapFromFile(file);
-      if (bitmap.width > maxDimensions || bitmap.height > maxDimensions) {
-        bitmap.close();
-        handleError(`Image dimensions exceed ${maxDimensions}×${maxDimensions}px`);
-        return;
+      setLoading(true);
+      setError(null);
+
+      // File type validation (only for File, not Blob from fetch)
+      if (file instanceof File && !file.type.startsWith('image/')) {
+        throw new Error('Please select a valid image file');
       }
 
-      //generate preview URL
+      // File size validation
+      if (file.size > maxSize * 1024 * 1024) {
+        throw new Error(`File size exceeds ${maxSize}MB`);
+      }
+
+      const bitmap = await createBitmapFromFile(file);
+
+      // Dimension validation
+      if (bitmap.width > maxDimensions || bitmap.height > maxDimensions) {
+        bitmap.close?.();
+        throw new Error(`Image dimensions exceed ${maxDimensions}×${maxDimensions}px`);
+      }
+
       const previewUrl = URL.createObjectURL(file);
       onImageLoad(bitmap, file instanceof File ? file : null, previewUrl);
     } catch (err) {
-      handleError(err instanceof Error ? err.message : 'Failed to load image');
+      // Centralized error capture
+      const message = err instanceof Error ? err.message : 'Failed to load image';
+      handleError(message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [createBitmapFromFile, handleError, maxSize, maxDimensions, onImageLoad]);
 
-  //fetch file and converts to blob pre-processing
-  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+  // === Event handlers ===
+  const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     await processImage(file);
-  };
+    // Optional: clear input value so same file can be re-uploaded if needed
+    e.target.value = '';
+  }, [processImage]);
 
-  const handleUrlSubmit = async () => {
+  const handleUrlSubmit = useCallback(async () => {
     if (!urlInput.trim()) return;
-    setLoading(true);
-    setError(null);
-
     try {
-      let blob: Blob;
+      setLoading(true);
+      setError(null);
 
-      if (urlInput.startsWith('data:')) {
-        // Data URL
-        const res = await fetch(urlInput);
-        blob = await res.blob();
-      } else {
-        const response = await fetch(urlInput, { mode: 'cors', credentials: 'omit' });
-        if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
-        const contentType = response.headers.get('content-type');
-        if (!contentType?.startsWith('image/')) throw new Error('URL does not point to a valid image');
-        blob = await response.blob();
-      }
+      const response = await fetch(urlInput, { mode: 'cors', credentials: 'omit' });
+      if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+      const contentType = response.headers.get('content-type');
+      if (!contentType?.startsWith('image/')) throw new Error('URL does not point to a valid image');
 
+      const blob = await response.blob();
       await processImage(blob);
     } catch (err) {
-      handleError(err instanceof Error ? err.message : 'Failed to load image from URL');
+      const message = err instanceof Error ? err.message : 'Failed to load image from URL';
+      handleError(message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [urlInput, processImage, handleError]);
 
-  // Return the JSX for the component - upload drop zone, url input, error display
+  // === UI ===
   return (
     <div className="w-full max-w-2xl">
-      {/* Upload Section */}
       <div className="space-y-4">
-        {/* File Upload */}
+        {/* File Upload Section */}
         <div>
           <input
             ref={fileInputRef}
@@ -140,12 +134,13 @@ export default function ImageInput({
             htmlFor="file-upload"
             className={`
               flex flex-col items-center justify-center w-full h-48 
-              border-2 border-dashed rounded-lg cursor-pointer
-              transition-colors
-              ${loading ? 'border-gray-600 bg-gray-800/50 cursor-not-allowed' : 'border-gray-600 hover:border-blue-500 bg-gray-800 hover:bg-gray-750'}
+              border-2 border-dashed rounded-lg cursor-pointer transition-colors
+              ${loading
+                ? 'border-gray-600 bg-gray-800/50 cursor-not-allowed'
+                : 'border-gray-600 hover:border-blue-500 bg-gray-800 hover:bg-gray-750'}
             `}
           >
-            <div className="flex flex-col items-center justify-center pt-5 pb-6">
+            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
               <Upload className={`w-10 h-10 mb-3 ${loading ? 'text-gray-600' : 'text-gray-400'}`} />
               <p className="mb-2 text-sm text-gray-400">
                 <span className="font-semibold">Click to upload</span> or drag and drop
@@ -157,7 +152,7 @@ export default function ImageInput({
           </label>
         </div>
 
-        {/* URL Input */}
+        {/* URL Input Section */}
         <div className="flex gap-2">
           <div className="relative flex-1">
             <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
@@ -180,13 +175,17 @@ export default function ImageInput({
             className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 
                        disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
           >
-            {loading ? 'Loading...' : 'Load'}
+            {loading ? 'Loading…' : 'Load'}
           </button>
         </div>
 
         {/* Error Display */}
         {error && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3">
+          <div
+            role="alert"
+            aria-live="polite" // accessibility improvement
+            className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3"
+          >
             <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <p className="text-red-400 text-sm">{error}</p>
           </div>
