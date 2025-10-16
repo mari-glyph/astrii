@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 
-//Manage image state cross-app
 export interface ImageState {
   bitmap: ImageBitmap | null;
   file: File | null;
@@ -18,37 +17,27 @@ export function useImageInput() {
     previewUrl: null,
   });
 
-  //hangle incoming image from ImageInput & cleans up prev img
+  /** Cleans up bitmap and object URLs to prevent memory leaks */
+  const cleanup = (prev: ImageState) => {
+    prev.bitmap?.close();
+    if (prev.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+  };
+
+  /** Stores a new image and releases old resources */
   const handleImageLoad = useCallback((bitmap: ImageBitmap, file: File | null, previewUrl: string) => {
     setImageState(prev => {
-      prev.bitmap?.close();
-      if (prev.previewUrl) {
-        URL.revokeObjectURL(prev.previewUrl);
-      }
-      return {
-        bitmap,
-        file,
-        width: bitmap.width,
-        height: bitmap.height,
-        previewUrl,
-      };
+      cleanup(prev);
+      return { bitmap, file, width: bitmap.width, height: bitmap.height, previewUrl };
     });
   }, []);
 
-  //Reset image state & clean up resources
+  /** Clears image and releases resources */
   const clearImage = useCallback(() => {
     setImageState(prev => {
-      prev.bitmap?.close();
-      if (prev.previewUrl) {
-        URL.revokeObjectURL(prev.previewUrl);
-      }
+      cleanup(prev);
       return { bitmap: null, file: null, width: 0, height: 0, previewUrl: null };
     });
   }, []);
 
-  return {
-    imageState,
-    handleImageLoad,
-    clearImage,
-  };
+  return { imageState, handleImageLoad, clearImage };
 }
