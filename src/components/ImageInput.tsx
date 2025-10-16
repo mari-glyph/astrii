@@ -1,4 +1,4 @@
-import { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Upload, Link as LinkIcon, AlertCircle } from 'lucide-react';
 
 interface ImageInputProps {
@@ -6,6 +6,7 @@ interface ImageInputProps {
   onError?: (error: string) => void;
   maxSize?: number; // mb
   maxDimensions?: number; // max width or height
+  worker?: Worker; // optional worker to send bitmap to
 }
 
 export default function ImageInput({
@@ -13,41 +14,37 @@ export default function ImageInput({
   onError,
   maxSize = 10,
   maxDimensions = 4096,
+  worker,
 }: ImageInputProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // handles and propagates errors consistently
+  // handle and propagate errors consistently
   const handleError = (message: string) => {
     setError(message);
     onError?.(message);
     setLoading(false);
   };
 
-  // decodes an image bitmap safely with safari fallback
+  // decode image safely with safari fallback
   const createBitmapFromFile = async (file: File | Blob): Promise<ImageBitmap> => {
     try {
       if (typeof window.createImageBitmap === 'function') {
         try {
           return await window.createImageBitmap(file);
         } catch (err) {
-          console.warn('[ImageInput] createImageBitmap failed, using fallback:', err);
+          console.warn('[imageinput] createImageBitmap failed, using fallback:', err);
         }
       }
-
-      // fallback: manually load image for older safari
+      // fallback for safari / older browsers
       return await new Promise((resolve, reject) => {
         const img = new Image();
         const url = URL.createObjectURL(file);
         img.onload = () => {
           URL.revokeObjectURL(url);
-          resolve({
-            width: img.width,
-            height: img.height,
-            close: () => {},
-          } as ImageBitmap);
+          resolve({ width: img.width, height: img.height, close: () => {} } as ImageBitmap);
         };
         img.onerror = () => {
           URL.revokeObjectURL(url);
@@ -60,7 +57,7 @@ export default function ImageInput({
     }
   };
 
-  // validates and processes image files or blobs
+  // validate and process image files or blobs
   const processImage = async (file: File | Blob) => {
     setLoading(true);
     setError(null);
@@ -89,6 +86,13 @@ export default function ImageInput({
 
       const previewUrl = URL.createObjectURL(file);
       onImageLoad(bitmap, file instanceof File ? file : null, previewUrl);
+
+      // transfer bitmap to worker if provided
+      if (worker) {
+        // create a transferable bitmap to avoid blocking main thread
+        const transferableBitmap = await createBitmapFromFile(file);
+        worker.postMessage(transferableBitmap, [transferableBitmap]);
+      }
     } catch (err) {
       handleError(err instanceof Error ? err.message : 'failed to load image');
     } finally {
@@ -96,35 +100,26 @@ export default function ImageInput({
     }
   };
 
-  // handles file selection from local input
+  // handle local file input
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) await processImage(file);
   };
 
-  // handles loading image from url input
+  // handle url input
   const handleUrlSubmit = async () => {
     if (!urlInput.trim()) return;
     setLoading(true);
     setError(null);
 
     try {
-      // fetch remote image with cors validation
       const response = await fetch(urlInput, { mode: 'cors', credentials: 'omit' });
-
-      // check non-ok responses
       if (!response.ok) throw new Error(`failed to fetch image: ${response.statusText}`);
-
-      // detect blocked or restricted responses (safari, no-cors)
       if (response.type === 'opaque') {
-        throw new Error('image blocked by cors policy — source server must allow cross-origin access');
+        throw new Error('image blocked by cors policy — source must allow cross-origin access');
       }
-
-      // validate mime type
       const contentType = response.headers.get('content-type');
       if (!contentType?.startsWith('image/')) throw new Error('url does not point to a valid image');
-
-      // convert to blob for processing
       const blob = await response.blob();
       await processImage(blob);
     } catch (err) {
@@ -132,8 +127,7 @@ export default function ImageInput({
         err instanceof TypeError
           ? 'image fetch failed — possible cors restriction or invalid url'
           : (err as Error).message;
-
-      console.error('[ImageInput] url import error:', message);
+      console.error('[imageinput] url import error:', message);
       handleError(message);
     } finally {
       setLoading(false);
