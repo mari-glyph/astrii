@@ -37,25 +37,14 @@ export default function App() {
     workerRef.current?.postMessage(config);
   };
 
-  // handle image load debug
+  // handle image load
   const handleDebugLoad = (bitmap: ImageBitmap, file: File | null, previewUrl: string) => {
-    console.info("[imageinput debug] image loaded via imageinput");
     handleImageLoad(bitmap, file, previewUrl);
   };
 
-  // log state for both components
-  useEffect(() => {
-    console.group("[app debug]");
-    console.log("current ascii config:", asciiConfig);
-    console.log("current image state:", imageState);
-    console.groupEnd();
-  }, [asciiConfig, imageState]);
-
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-start gap-8 p-6">
-      <h1 className="text-xl font-semibold mb-2">
-        image input + ascii config debug
-      </h1>
+      <h1 className="text-xl font-semibold mb-2">image input + ascii config</h1>
 
       {/* ascii config panel */}
       <div className="w-full max-w-3xl bg-gray-900/40 border border-gray-800 rounded-xl p-6 shadow-lg">
@@ -69,10 +58,7 @@ export default function App() {
         ) : (
           <div className="relative flex flex-col items-center">
             <button
-              onClick={() => {
-                console.info("[imageinput debug] clear button clicked.");
-                clearImage();
-              }}
+              onClick={clearImage}
               className="absolute top-2 right-2 p-1 bg-black/50 hover:bg-black/70 rounded-full transition"
               aria-label="clear image"
             >
@@ -83,8 +69,6 @@ export default function App() {
               src={imageState.previewUrl}
               alt="preview"
               className="max-w-xs rounded-lg border border-gray-700"
-              onLoad={() => console.info("[imageinput debug] preview image rendered.")}
-              onError={() => console.error("[imageinput debug] failed to render preview.")}
             />
 
             <div className="mt-2 text-sm text-gray-400 text-center">
@@ -99,7 +83,8 @@ export default function App() {
         )}
       </div>
 
-      {/* optional json output */}
+      {/* debug output - commented out */}
+      {/*
       <div className="w-full max-w-3xl mt-8">
         <pre className="text-xs bg-gray-900/60 border border-gray-800 rounded-lg p-4 overflow-x-auto">
           {JSON.stringify(
@@ -118,6 +103,7 @@ export default function App() {
           )}
         </pre>
       </div>
+      */}
     </div>
   );
 }
