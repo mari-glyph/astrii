@@ -1,12 +1,12 @@
 // src/__tests__/RenderUtils.integration.test.ts
 
 import {
-  clamp,
+  //clamp,
   luminance,
   applyContrastBrightness,
   mapToChar,
   scaleImage,
-  rgbToHex,
+  //rgbToHex,
 } from '@/utils/RenderUtils';
 
 // mock OffscreenCanvas for node/jsdom

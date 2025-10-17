@@ -1,28 +1,72 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import ImageInput from "./components/ImageInput";
 import { useImageInput } from "./hooks/useImageInput";
 import AsciiConfigPanel from "./components/AsciiConfigPanel";
 import { DEFAULT_CONFIG } from "./hooks/useAsciiConfig";
+import type { AsciiConfig } from "./workers/asciiConfigWorker";
+import type { AsciiFrame } from "./workers/AsciiWorker";
 
 export default function App() {
   const { imageState, handleImageLoad, clearImage } = useImageInput();
   const [asciiConfig, setAsciiConfig] = useState(DEFAULT_CONFIG);
-  const workerRef = useRef<Worker | null>(null);
+  const [asciiFrame, setAsciiFrame] = useState<AsciiFrame | null>(null);
+  const [progress, setProgress] = useState(0);
 
-  // initialize worker for config validation
+  const configWorkerRef = useRef<Worker | null>(null);
+  const asciiWorkerRef = useRef<Worker | null>(null);
+
+  // initialize config worker
   useEffect(() => {
-    workerRef.current = new Worker(
+    configWorkerRef.current = new Worker(
       new URL("./workers/asciiConfigWorker.ts", import.meta.url),
       { type: "module" }
     );
 
-    const w = workerRef.current;
+    const w = configWorkerRef.current;
     w.onmessage = (e) => {
-      if (e.data.success) {
-        console.log("[app] valid config ready:", e.data.config);
-      } else {
-        console.error("[app] config validation failed:", e.data.error);
+      if (!e.data.success) return console.error("[App] Config validation failed:", e.data.error);
+      console.log("[App] Config validated:", e.data.config);
+
+      // post image + validated config to asciiWorker
+      if (imageState.bitmap) {
+        asciiWorkerRef.current?.postMessage({
+          type: "process",
+          imageBitmap: imageState.bitmap,
+          config: {
+            cols: 80,
+            rows: 40,
+            charset: e.data.config.charset,
+            contrast: e.data.config.contrastEnd,
+            brightness: e.data.config.brightnessEnd,
+            gamma: 1,
+            colorsEnabled: e.data.config.colorMode,
+          },
+          frameIndex: 0,
+        });
+      }
+    };
+
+    return () => {
+      w.terminate();
+    };
+  }, [imageState.bitmap]);
+
+  // initialize ascii worker
+  useEffect(() => {
+    asciiWorkerRef.current = new Worker(
+      new URL("./workers/AsciiWorker.ts", import.meta.url),
+      { type: "module" }
+    );
+
+    const w = asciiWorkerRef.current;
+    w.onmessage = (e) => {
+      if (e.data.type === "progress") {
+        setProgress(e.data.value);
+      } else if ("text" in e.data) {
+        setAsciiFrame(e.data);
+      } else if (e.data.type === "error") {
+        console.error("[AsciiWorker] error:", e.data.message);
       }
     };
 
@@ -31,15 +75,18 @@ export default function App() {
     };
   }, []);
 
-  // handle config changes from asciiconfigpanel
+  // handle config changes
   const handleConfigChange = (config: typeof DEFAULT_CONFIG) => {
     setAsciiConfig(config);
-    workerRef.current?.postMessage(config);
+    configWorkerRef.current?.postMessage(config);
   };
 
   // handle image load
   const handleDebugLoad = (bitmap: ImageBitmap, file: File | null, previewUrl: string) => {
     handleImageLoad(bitmap, file, previewUrl);
+
+    // re-run ASCII worker if config already validated
+    configWorkerRef.current?.postMessage(asciiConfig);
   };
 
   return (
@@ -83,27 +130,28 @@ export default function App() {
         )}
       </div>
 
-      {/* debug output - commented out */}
-      {/*
-      <div className="w-full max-w-3xl mt-8">
-        <pre className="text-xs bg-gray-900/60 border border-gray-800 rounded-lg p-4 overflow-x-auto">
-          {JSON.stringify(
-            {
-              image: imageState.previewUrl
-                ? {
-                    width: imageState.width,
-                    height: imageState.height,
-                    file: imageState.file?.name,
-                  }
-                : null,
-              config: asciiConfig,
-            },
-            null,
-            2
-          )}
-        </pre>
-      </div>
-      */}
+      {/* ascii preview */}
+      {asciiFrame && (
+        <div className="w-full max-w-3xl mt-6">
+          <div className="text-sm text-gray-400 mb-1">progress: {(progress * 100).toFixed(0)}%</div>
+          <pre style={{ lineHeight: 0.6, fontFamily: asciiConfig.font }}>
+            {asciiFrame.text.map((row, i) => (
+              <span key={i}>
+                {row.map((char, j) =>
+                  asciiFrame.colors ? (
+                    <span key={j} style={{ color: asciiFrame.colors[i][j] }}>
+                      {char}
+                    </span>
+                  ) : (
+                    char
+                  )
+                )}
+                {"\n"}
+              </span>
+            ))}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
