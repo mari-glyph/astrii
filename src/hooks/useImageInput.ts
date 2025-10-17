@@ -17,13 +17,13 @@ export function useImageInput() {
     previewUrl: null,
   });
 
-  /** Cleans up bitmap and object URLs to prevent memory leaks */
+  /* cleans up bitmap and object URLs to prevent memory leaks */
   const cleanup = (prev: ImageState) => {
     prev.bitmap?.close();
     if (prev.previewUrl) URL.revokeObjectURL(prev.previewUrl);
   };
 
-  /** Stores a new image and releases old resources */
+  /* stores a new image and releases old resources */
   const handleImageLoad = useCallback((bitmap: ImageBitmap, file: File | null, previewUrl: string) => {
     setImageState(prev => {
       cleanup(prev);
@@ -31,7 +31,7 @@ export function useImageInput() {
     });
   }, []);
 
-  /** Clears image and releases resources */
+  /* clears image and releases resources */
   const clearImage = useCallback(() => {
     setImageState(prev => {
       cleanup(prev);

@@ -1,4 +1,4 @@
-// worker context
+// imageWorker context
 
 self.addEventListener('message', (e) => {
   const bitmap = e.data as ImageBitmap;
